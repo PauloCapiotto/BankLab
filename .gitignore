@@ -1,0 +1,17 @@
+.superpowers/
+.env
+.env.*
+!.env.example
+node_modules/
+.next/
+dist/
+build/
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
+*.pyc
+*.log
+coverage/
+htmlcov/
+.DS_Store
