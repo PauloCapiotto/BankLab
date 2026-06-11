@@ -6,7 +6,13 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   plugins: [react()],
   test: {
+    globals: true,
     environment: "jsdom",
+    environmentOptions: {
+      jsdom: {
+        url: "http://localhost/",
+      },
+    },
     setupFiles: ["./tests/setup.ts"],
   },
   resolve: {
