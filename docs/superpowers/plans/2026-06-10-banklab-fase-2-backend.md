@@ -1750,6 +1750,55 @@ async def test_valor_negativo_retorna_422(client, session):
     )
     assert response.status_code == 422
     assert response.json()["code"] == "VALIDATION_ERROR"
+
+
+async def test_conta_origem_inativa_retorna_422(client, session):
+    maria = await create_user(session)
+    joao = await create_user(session, name="João Souza", email="joao@banklab.local")
+    origem = await create_account(
+        session, maria, number="0042-0", balance=Decimal("1000.00"), status="blocked"
+    )
+    await create_account(session, joao, number="0188-3")
+    response = await client.post(
+        "/transfers",
+        json=transfer_payload(origem.id, "0188-3"),
+        headers=idem_headers(maria),
+    )
+    assert response.status_code == 422
+    assert response.json()["code"] == "ACCOUNT_NOT_ACTIVE"
+
+
+async def test_corrida_de_idempotencia_cai_no_fallback_sem_duplicar(
+    client, session, monkeypatch
+):
+    from app.modules.transfers import router as transfers_router
+
+    maria, joao, origem, destino = await fixture_contas(session)
+    headers = idem_headers(maria, key="transfer-corrida-1")
+    payload = transfer_payload(origem.id, "0188-3", "100.00")
+
+    first = await client.post("/transfers", json=payload, headers=headers)
+    assert first.status_code == 201
+
+    original_find = transfers_router._find_existing
+    calls = {"n": 0}
+
+    async def stale_find(session_, user_id, key):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return None
+        return await original_find(session_, user_id, key)
+
+    monkeypatch.setattr(transfers_router, "_find_existing", stale_find)
+
+    second = await client.post("/transfers", json=payload, headers=headers)
+    assert second.status_code == 201
+    assert second.json()["transfer_id"] == first.json()["transfer_id"]
+
+    await session.refresh(origem)
+    await session.refresh(destino)
+    assert origem.balance == Decimal("900.00")
+    assert destino.balance == Decimal("600.00")
 ```
 
 - [ ] **Step 2: Rodar e confirmar falha**
@@ -1787,6 +1836,7 @@ As duas contas são travadas com `FOR UPDATE` em ordem determinística de `id` p
 
 ```python
 import datetime as dt
+import uuid
 
 from fastapi import APIRouter, Depends, Header
 from sqlalchemy import select
@@ -1805,7 +1855,7 @@ router = APIRouter(tags=["transfers"])
 
 
 async def _find_existing(
-    session: AsyncSession, user: models.User, key: str
+    session: AsyncSession, user_id: uuid.UUID, key: str
 ) -> TransferResponse | None:
     result = await session.execute(
         select(models.Transaction, models.Account)
@@ -1813,7 +1863,7 @@ async def _find_existing(
         .where(
             models.Transaction.idempotency_key == key,
             models.Transaction.type == "transfer_out",
-            models.Account.user_id == user.id,
+            models.Account.user_id == user_id,
         )
     )
     row = result.first()
@@ -1849,7 +1899,11 @@ async def create_transfer(
             400, "IDEMPOTENCY_KEY_REQUIRED", "O header Idempotency-Key é obrigatório."
         )
 
-    existing = await _find_existing(session, user, idempotency_key)
+    # Capturado antes de qualquer rollback: após rollback o objeto ORM expira
+    # e acessar user.id dispararia lazy-load fora do greenlet (MissingGreenlet).
+    user_id = user.id
+
+    existing = await _find_existing(session, user_id, idempotency_key)
     if existing is not None:
         return existing
 
@@ -1857,7 +1911,7 @@ async def create_transfer(
         await session.execute(
             select(models.Account).where(
                 models.Account.id == payload.source_account_id,
-                models.Account.user_id == user.id,
+                models.Account.user_id == user_id,
             )
         )
     ).scalar_one_or_none()
@@ -1929,25 +1983,27 @@ async def create_transfer(
     session.add_all([tx_out, tx_in])
     source.balance = source.balance - payload.amount
     destination.balance = destination.balance + payload.amount
-    await session.flush()
-    await record_audit(
-        session,
-        actor_user_id=user.id,
-        action="transfer.completed",
-        entity_type="transaction",
-        entity_id=tx_out.id,
-        metadata={
-            "amount": f"{payload.amount:.2f}",
-            "source_account_id": str(source.id),
-            "destination_account_id": str(destination.id),
-        },
-    )
 
+    # flush + audit + commit dentro do try: o IntegrityError da constraint
+    # única dispara já no flush, e o fallback precisa alcançá-lo.
     try:
+        await session.flush()
+        await record_audit(
+            session,
+            actor_user_id=user_id,
+            action="transfer.completed",
+            entity_type="transaction",
+            entity_id=tx_out.id,
+            metadata={
+                "amount": f"{payload.amount:.2f}",
+                "source_account_id": str(source.id),
+                "destination_account_id": str(destination.id),
+            },
+        )
         await session.commit()
     except IntegrityError:
         await session.rollback()
-        existing = await _find_existing(session, user, idempotency_key)
+        existing = await _find_existing(session, user_id, idempotency_key)
         if existing is not None:
             return existing
         raise
@@ -1959,7 +2015,7 @@ async def create_transfer(
             "destination_transaction_id": str(tx_in.id),
             "source_account_id": str(source.id),
             "destination_account_id": str(destination.id),
-            "source_user_id": str(user.id),
+            "source_user_id": str(user_id),
             "destination_user_id": str(destination.user_id),
             "amount": f"{payload.amount:.2f}",
             "occurred_at": now.isoformat(),
@@ -1986,7 +2042,7 @@ app.include_router(transfers_router)
 - [ ] **Step 6: Rodar testes**
 
 Run: `.venv/bin/pytest tests/test_transfers.py -v`
-Expected: `7 passed`
+Expected: `9 passed`
 
 - [ ] **Step 7: Commit**
 
