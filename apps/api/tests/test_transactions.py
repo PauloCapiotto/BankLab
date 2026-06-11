@@ -129,3 +129,15 @@ async def test_nao_lista_transacoes_de_outro_usuario(client, session):
 
     response = await client.get("/transactions", headers=auth_headers(maria))
     assert response.json()["total"] == 0
+
+
+async def test_filtro_por_conta_de_outro_usuario_retorna_vazio(client, session):
+    maria = await create_user(session)
+    joao = await create_user(session, name="João Souza", email="joao@banklab.local")
+    conta_joao = await create_account(session, joao)
+    await criar_transacoes(session, conta_joao)
+
+    response = await client.get(
+        f"/transactions?account_id={conta_joao.id}", headers=auth_headers(maria)
+    )
+    assert response.json()["total"] == 0
