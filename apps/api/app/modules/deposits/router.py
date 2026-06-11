@@ -18,9 +18,8 @@ router = APIRouter(tags=["deposits"])
 
 
 async def _find_existing(
-    session: AsyncSession, user: models.User | uuid.UUID, key: str
+    session: AsyncSession, user_id: uuid.UUID, key: str
 ) -> DepositResponse | None:
-    user_id: uuid.UUID = user if isinstance(user, uuid.UUID) else user.id
     result = await session.execute(
         select(models.Transaction, models.Account)
         .join(models.Account, models.Transaction.account_id == models.Account.id)
@@ -53,11 +52,13 @@ async def create_deposit(
             400, "IDEMPOTENCY_KEY_REQUIRED", "O header Idempotency-Key é obrigatório."
         )
 
-    existing = await _find_existing(session, user, idempotency_key)
+    # Capturado antes de qualquer rollback: após rollback o objeto ORM expira
+    # e acessar user.id dispararia lazy-load fora do greenlet (MissingGreenlet).
+    user_id = user.id
+
+    existing = await _find_existing(session, user_id, idempotency_key)
     if existing is not None:
         return existing
-
-    user_id: uuid.UUID = user.id
 
     result = await session.execute(
         select(models.Account)

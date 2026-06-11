@@ -180,6 +180,22 @@ async def test_conta_origem_inativa_retorna_422(client, session):
     assert response.json()["code"] == "ACCOUNT_NOT_ACTIVE"
 
 
+async def test_conta_destino_inativa_retorna_422(client, session):
+    maria = await create_user(session)
+    joao = await create_user(session, name="João Souza", email="joao@banklab.local")
+    origem = await create_account(
+        session, maria, number="0042-0", balance=Decimal("1000.00")
+    )
+    await create_account(session, joao, number="0188-3", status="blocked")
+    response = await client.post(
+        "/transfers",
+        json=transfer_payload(origem.id, "0188-3"),
+        headers=idem_headers(maria),
+    )
+    assert response.status_code == 422
+    assert response.json()["code"] == "ACCOUNT_NOT_ACTIVE"
+
+
 async def test_corrida_de_idempotencia_cai_no_fallback_sem_duplicar(
     client, session, monkeypatch
 ):

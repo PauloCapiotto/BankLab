@@ -38,6 +38,7 @@ async def _find_existing(
             select(models.Transaction).where(
                 models.Transaction.idempotency_key == key,
                 models.Transaction.type == "transfer_in",
+                models.Transaction.related_account_id == source_account.id,
             )
         )
     ).scalar_one()
