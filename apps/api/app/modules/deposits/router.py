@@ -1,4 +1,5 @@
 import datetime as dt
+import uuid
 
 from fastapi import APIRouter, Depends, Header
 from sqlalchemy import select
@@ -17,15 +18,16 @@ router = APIRouter(tags=["deposits"])
 
 
 async def _find_existing(
-    session: AsyncSession, user: models.User, key: str
+    session: AsyncSession, user: models.User | uuid.UUID, key: str
 ) -> DepositResponse | None:
+    user_id: uuid.UUID = user if isinstance(user, uuid.UUID) else user.id
     result = await session.execute(
         select(models.Transaction, models.Account)
         .join(models.Account, models.Transaction.account_id == models.Account.id)
         .where(
             models.Transaction.idempotency_key == key,
             models.Transaction.type == "deposit",
-            models.Account.user_id == user.id,
+            models.Account.user_id == user_id,
         )
     )
     row = result.first()
@@ -55,11 +57,13 @@ async def create_deposit(
     if existing is not None:
         return existing
 
+    user_id: uuid.UUID = user.id
+
     result = await session.execute(
         select(models.Account)
         .where(
             models.Account.id == payload.account_id,
-            models.Account.user_id == user.id,
+            models.Account.user_id == user_id,
         )
         .with_for_update()
     )
@@ -81,21 +85,20 @@ async def create_deposit(
     )
     session.add(tx)
     account.balance = account.balance + payload.amount
-    await session.flush()
-    await record_audit(
-        session,
-        actor_user_id=user.id,
-        action="deposit.completed",
-        entity_type="transaction",
-        entity_id=tx.id,
-        metadata={"amount": f"{payload.amount:.2f}", "account_id": str(account.id)},
-    )
-
     try:
+        await session.flush()
+        await record_audit(
+            session,
+            actor_user_id=user_id,
+            action="deposit.completed",
+            entity_type="transaction",
+            entity_id=tx.id,
+            metadata={"amount": f"{payload.amount:.2f}", "account_id": str(account.id)},
+        )
         await session.commit()
     except IntegrityError:
         await session.rollback()
-        existing = await _find_existing(session, user, idempotency_key)
+        existing = await _find_existing(session, user_id, idempotency_key)
         if existing is not None:
             return existing
         raise
@@ -105,7 +108,7 @@ async def create_deposit(
             "event_type": "transaction.deposit.completed",
             "transaction_id": str(tx.id),
             "account_id": str(account.id),
-            "user_id": str(user.id),
+            "user_id": str(user_id),
             "amount": f"{payload.amount:.2f}",
             "occurred_at": now.isoformat(),
         }

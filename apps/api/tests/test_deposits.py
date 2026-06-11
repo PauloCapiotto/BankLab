@@ -133,3 +133,50 @@ async def test_precisao_decimal_em_depositos_sucessivos(client, session):
         assert response.status_code == 201
     await session.refresh(conta)
     assert conta.balance == Decimal("1000.30")
+
+
+async def test_corrida_de_idempotencia_cai_no_fallback_sem_duplicar(
+    client, session, monkeypatch
+):
+    from app.modules.deposits import router as deposits_router
+
+    maria = await create_user(session)
+    conta = await create_account(session, maria, balance=Decimal("1000.00"))
+
+    headers = idem_headers(maria, key="corrida-1")
+    first = await client.post(
+        "/deposits", json=deposit_payload(conta.id, "100.00"), headers=headers
+    )
+    assert first.status_code == 201
+
+    original_find = deposits_router._find_existing
+    calls = {"n": 0}
+
+    async def stale_find(session_, user, key):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return None
+        return await original_find(session_, user, key)
+
+    monkeypatch.setattr(deposits_router, "_find_existing", stale_find)
+
+    second = await client.post(
+        "/deposits", json=deposit_payload(conta.id, "100.00"), headers=headers
+    )
+    assert second.status_code == 201
+    assert second.json()["transaction_id"] == first.json()["transaction_id"]
+
+    await session.refresh(conta)
+    assert conta.balance == Decimal("1100.00")
+
+
+async def test_deposito_em_conta_inativa_retorna_422(client, session):
+    maria = await create_user(session)
+    conta = await create_account(session, maria, status="blocked")
+    response = await client.post(
+        "/deposits",
+        json=deposit_payload(conta.id),
+        headers=idem_headers(maria),
+    )
+    assert response.status_code == 422
+    assert response.json()["code"] == "ACCOUNT_NOT_ACTIVE"
