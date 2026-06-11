@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.errors import APIError
+from app.modules.auth.router import router as auth_router
 
 app = FastAPI(title="BankLab API", version="1.0.0")
 
@@ -40,6 +41,9 @@ async def validation_error_handler(
             "details": {"errors": errors},
         },
     )
+
+
+app.include_router(auth_router)
 
 
 @app.get("/health")
