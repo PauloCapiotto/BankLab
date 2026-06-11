@@ -7,6 +7,7 @@ from app.core.errors import APIError
 from app.modules.accounts.router import router as accounts_router
 from app.modules.auth.router import router as auth_router
 from app.modules.deposits.router import router as deposits_router
+from app.modules.transfers.router import router as transfers_router
 
 app = FastAPI(title="BankLab API", version="1.0.0")
 
@@ -48,6 +49,7 @@ async def validation_error_handler(
 app.include_router(auth_router)
 app.include_router(accounts_router)
 app.include_router(deposits_router)
+app.include_router(transfers_router)
 
 
 @app.get("/health")
