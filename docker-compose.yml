@@ -48,6 +48,18 @@ services:
       retries: 10
       start_period: 10s
 
+  worker:
+    build: ./apps/api
+    command: python -m app.workers.notifications_worker
+    environment:
+      DATABASE_URL: postgresql+asyncpg://banklab:banklab@postgres:5432/banklab
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   web:
     build:
       context: ./apps/web
