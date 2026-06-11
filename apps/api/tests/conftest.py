@@ -5,6 +5,7 @@ os.environ["DATABASE_URL"] = os.environ.get(
     "postgresql+asyncpg://banklab:banklab@localhost:5432/banklab_test",
 )
 os.environ["TESTING"] = "1"
+os.environ["REDIS_URL"] = "redis://localhost:6399/0"
 
 import uuid
 from decimal import Decimal
