@@ -25,6 +25,7 @@ def test_token_valido_decodifica_com_sub():
     payload = decode_access_token(token)
     assert payload["sub"] == "user-id-123"
     assert "exp" in payload
+    assert "iat" in payload
 
 
 def test_token_expirado_lanca_excecao():
