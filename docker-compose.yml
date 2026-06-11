@@ -29,6 +29,7 @@ services:
 
   api:
     build: ./apps/api
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+asyncpg://banklab:banklab@postgres:5432/banklab
       REDIS_URL: redis://redis:6379/0
@@ -50,6 +51,7 @@ services:
 
   worker:
     build: ./apps/api
+    restart: unless-stopped
     command: python -m app.workers.notifications_worker
     environment:
       DATABASE_URL: postgresql+asyncpg://banklab:banklab@postgres:5432/banklab

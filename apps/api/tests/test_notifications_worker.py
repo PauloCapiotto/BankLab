@@ -71,3 +71,36 @@ async def test_evento_de_transferencia_notifica_remetente_e_destinatario(
 
 def test_evento_desconhecido_nao_gera_notificacoes():
     assert build_notifications({"event_type": "outro.evento"}) == []
+
+
+class FakeRedisClient:
+    def __init__(self):
+        self.acked = []
+
+    async def xack(self, stream, group, entry_id):
+        self.acked.append(entry_id)
+
+
+async def test_entrada_com_falha_nao_recebe_ack(client, session):
+    from app.workers import notifications_worker as worker
+
+    fake = FakeRedisClient()
+    batches = [("banklab.transactions", [("1-0", {"data": "{json-invalido"})])]
+    await worker.process_entries(fake, batches)
+    assert fake.acked == []
+
+
+async def test_entrada_processada_recebe_ack(client, session):
+    import json
+
+    from app.workers import notifications_worker as worker
+
+    fake = FakeRedisClient()
+    batches = [
+        (
+            "banklab.transactions",
+            [("1-0", {"data": json.dumps({"event_type": "outro.evento"})})],
+        )
+    ]
+    await worker.process_entries(fake, batches)
+    assert fake.acked == ["1-0"]
