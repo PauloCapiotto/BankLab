@@ -48,5 +48,12 @@ services:
       retries: 10
       start_period: 10s
 
+  web:
+    build: ./apps/web
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
 volumes:
   postgres_data:
