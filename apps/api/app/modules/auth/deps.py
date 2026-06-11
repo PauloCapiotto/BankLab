@@ -26,7 +26,12 @@ async def get_current_user(
     except pyjwt.InvalidTokenError:
         raise APIError(401, "INVALID_TOKEN", "Token inválido.")
 
-    user = await session.get(models.User, uuid.UUID(payload["sub"]))
+    try:
+        user_id = uuid.UUID(payload["sub"])
+    except (KeyError, ValueError):
+        raise APIError(401, "INVALID_TOKEN", "Token inválido.")
+
+    user = await session.get(models.User, user_id)
     if user is None or user.status != "active":
         raise APIError(401, "INVALID_TOKEN", "Token inválido.")
     return user
